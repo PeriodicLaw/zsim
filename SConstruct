@@ -211,13 +211,18 @@ def buildSim(cppFlags, dir, type, pgo=None):
     conf = Configure(Environment(), conf_dir=joinpath(buildDir, ".sconf_temp"), log_file=joinpath(buildDir, "sconf.log"))
     #if conf.CheckLib('hdf5') and conf.CheckLib('hdf5_hl'):
     #    env["PINLIBS"] += ["hdf5", "hdf5_hl"]
-    if conf.CheckLib('hdf5_serial') and conf.CheckLib('hdf5_serial_hl'):
+    #if conf.CheckLib('hdf5_serial') and conf.CheckLib('hdf5_serial_hl'):
     # Serial version, in Ubuntu 15.04 and later.
-        env["PINLIBS"] += ["hdf5_serial", "hdf5_serial_hl"]
-        env["CPPFLAGS"] += ' -DHDF5INCPREFIX="hdf5/serial/"'
-    else:
-       print "ERROR: You need to install libhdf5 in the system"
-       sys.exit(1)
+    #    env["PINLIBS"] += ["hdf5_serial", "hdf5_serial_hl"]
+    #    env["CPPFLAGS"] += ' -DHDF5INCPREFIX="hdf5/serial/"'
+    
+    #if conf.CheckLib('hdf5') and conf.CheckLib('hdf5_hl'):
+    env["PINLIBS"] += ["hdf5", "hdf5_hl"]
+    env["CPPFLAGS"] += ' -DHDF5INCPREFIX="hdf5/serial/"'
+    #else:
+    #   print "ERROR: You need to install libhdf5 in the system"
+    #   print conf.CheckLib('hdf5-dev')
+    #   sys.exit(1)
 
     # Harness needs these defined
     env["CPPFLAGS"] += ' -DPIN_PATH="' + joinpath(PINPATH, "intel64/bin/pinbin") + '" '
@@ -237,6 +242,8 @@ def buildSim(cppFlags, dir, type, pgo=None):
         env["PINCPPFLAGS"] += useFlags
         env["PINLINKFLAGS"] += useFlags
     
+    #env["CPPFLAGS"] += ' -I/home/perl/work/nsy/dynamoriosc/core/lib/ -I/home/perl/work/nsy/dynamoriosc/include/ -I/home/perl/work/nsy/dynamoriosc/ext/include/ '
+
     env.SConscript("src/SConscript", variant_dir=buildDir, exports= {'env' : env.Clone()})
     
 ####
