@@ -26,6 +26,7 @@
  */
 
 #include "init.h"
+#include <fstream>
 #include <list>
 #include <sstream>
 #include <stdlib.h>
@@ -157,6 +158,8 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
         } else {
             rp = new LRUReplPolicy<false>(numLines);
         }
+    } else if (replType == "Opt") {
+        rp = new OptReplPolicy(numLines);
     } else if (replType == "LFU") {
         rp = new LFUReplPolicy(numLines);
     } else if (replType == "LRUProfViol") {
@@ -291,7 +294,7 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
     } else {
         //Filter cache optimization
         if (type != "Simple") panic("Terminal cache %s can only have type == Simple", name.c_str());
-        if (arrayType != "SetAssoc" || hashType != "None" || replType != "LRU") panic("Invalid FilterCache config %s", name.c_str());
+        if (arrayType != "SetAssoc" || hashType != "None" || (replType != "LRU" && replType != "Opt" && replType != "Rand")) panic("Invalid FilterCache config %s", name.c_str());
 
         //Access based Next Line Prefetch
         uint32_t numLinesNLP = config.get<uint32_t>(prefix + "numLinesNLP", 0);

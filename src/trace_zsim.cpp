@@ -33,6 +33,8 @@
 #include <iostream>
 #include <math.h>
 #include <string>
+#include <map>
+#include <vector>
 
 #include "access_tracing.h"
 #include "config.h"
@@ -69,6 +71,11 @@ InstrFuncPtrs fPtrs[MAX_THREADS] ATTR_LINE_ALIGNED; //minimize false sharing
 pthread_barrier_t barrier;
 std::atomic<int> threads_active;
 std::chrono::steady_clock::time_point last;
+
+
+std::map<uint64_t, std::vector<uint64_t>> future_counts; // trace_zsim.cpp
+bool record_counts = false; // trace_zsim.cpp
+uint64_t timestamp = 0; // trace_zsim.cpp
 
 /* Per-thread variables */
 thread_local bool finished = false;
@@ -460,6 +467,32 @@ int main(int argc, char *argv[]) {
     }
 
     pthread_barrier_init(&barrier, NULL, spawn_threads);
+    
+    // prepare for future counts
+    const char* count_path = conf.get<const char*>("count_file", "");
+    record_counts = strcmp(conf.get<const char*>("record_counts", "true"), "true")==0;
+    printf("count_path=%s, record_counts=%s\n",count_path,record_counts?"true":"false");
+    if(!record_counts){
+        // read the count data for optimal replacement
+        std::ifstream fs(count_path);
+        if(!fs)
+            panic("can not open %s",count_path);
+        while (!fs.eof()){
+            char s[40];
+            fs.getline(s,40);
+            if(fs.eof()) break;
+            uint64_t pc = strtoull(s, nullptr, 16);
+            future_counts[pc] = std::vector<uint64_t>();
+            while(!fs.eof()){
+                fs.getline(s,40);
+                if(fs.eof()) break;
+                if(strlen(s)==0) break;
+                uint64_t time = strtoull(s,nullptr,10);
+                future_counts[pc].push_back(time);
+            }
+        }
+        fs.close();
+    }
 
     for (uint32_t i = 0; i < zinfo->numCores; i++) {
         std::stringstream p_ss;
@@ -501,4 +534,30 @@ int main(int argc, char *argv[]) {
 #ifdef ZSIM_USE_YT
     for (YTTracer* t : *(zinfo->YTtraceWriters)) t->dump(false);
 #endif  // ZSIM_USE_YT
+
+    if(record_counts){
+        std::ofstream fs(count_path);
+        if(!fs)
+            panic("can not open %s",count_path);
+        int tot=0;
+        for(auto x: future_counts){
+            fs << std::hex << x.first << "\n" << std::dec;
+            for(auto it = x.second.rbegin(); it != x.second.rend(); ++it){
+                fs << *it << "\n";
+                tot++;
+            }
+            fs << "\n";
+        }
+        printf("tot=%d\n",tot);
+        fs.close();
+    }else{
+        int tot=0;
+        for(auto x: future_counts){
+            if(!x.second.empty()){
+                tot+=x.second.size();
+            }
+        }
+        printf("afterwards future_counts: %d\n",tot);
+    }
+
 }

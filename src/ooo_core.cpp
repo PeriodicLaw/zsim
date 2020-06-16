@@ -452,7 +452,7 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
         Address wrongPathAddr = branchTaken? branchNotTakenNpc : branchTakenNpc;
         uint64_t reqCycle = fetchCycle;
         for (uint32_t i = 0; i < 5*64/lineSize; i++) {
-            uint64_t fetchLat = l1i->load(wrongPathAddr + lineSize*i, curCycle, curCycle, 0 /*no PC*/, &cRec) - curCycle;
+            uint64_t fetchLat = l1i->load(wrongPathAddr + lineSize*i, curCycle, curCycle, bblAddr /*0 no PC*/, &cRec) - curCycle;
             uint64_t respCycle = reqCycle + fetchLat;
             if (respCycle > lastCommitCycle) {
                 break;
@@ -475,7 +475,7 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
         // Do not model fetch throughput limit here, decoder-generated stalls already include it
         // We always call fetches with curCycle to avoid upsetting the weave
         // models (but we could move to a fetch-centric recorder to avoid this)
-        uint64_t fetchLat = l1i->load(fetchAddr, curCycle, curCycle, 0 /*no PC*/, &cRec) - curCycle;
+        uint64_t fetchLat = l1i->load(fetchAddr, curCycle, curCycle, bblAddr /*0 no PC*/, &cRec) - curCycle;
         fetchCycle += fetchLat;
     }
 

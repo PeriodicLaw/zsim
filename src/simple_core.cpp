@@ -64,7 +64,7 @@ void SimpleCore::bbl(Address bblAddr, BblInfo* bblInfo) {
 
     Address endBblAddr = bblAddr + bblInfo->bytes;
     for (Address fetchAddr = bblAddr; fetchAddr < endBblAddr; fetchAddr+=(1 << lineBits)) {
-        curCycle = l1i->load(fetchAddr, curCycle, 0 /*no PC*/);
+        curCycle = l1i->load(fetchAddr, curCycle, fetchAddr /*0 no PC*/);
     }
 }
 

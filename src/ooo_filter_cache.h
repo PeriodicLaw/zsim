@@ -112,7 +112,7 @@ public:
             Address pLineAddr = procMask | vLineAddr;
             Address nextPLineAddr = pLineAddr + numLines;
             issuePrefetch(nextPLineAddr, 0/*prefetch into L1*/, curCycle,
-                          dispatchCycle, cRec, 0 /*No PC*/, false);
+                          dispatchCycle, cRec, 0/*no PC*/, false);
         }
 #ifdef TRACE_BASED
         //Access Dataflow Prefetcher

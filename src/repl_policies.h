@@ -32,6 +32,12 @@
 #include "coherence_ctrls.h"
 #include "memory_hierarchy.h"
 #include "mtrand.h"
+#include <map>
+#include <vector>
+
+extern std::map<uint64_t, std::vector<uint64_t>> future_counts; // trace_zsim.cpp
+extern bool record_counts; // trace_zsim.cpp
+extern uint64_t timestamp; // trace_zsim.cpp
 
 /* Generic replacement policy interface. A replacement policy is initialized by the cache (by calling setTop/BottomCC) and used by the cache array. Usage follows two models:
  * - On lookups, update() is called if the replacement policy is to be updated on a hit
@@ -271,7 +277,14 @@ class RandReplPolicy : public LegacyReplPolicy {
             gm_free(candArray);
         }
 
-        void update(uint32_t id, const MemReq* req) {}
+        void update(uint32_t id, const MemReq* req) {
+            
+            if(record_counts){
+                // when recording, we should record incresingly, and output reversely
+                future_counts[req->lineAddr].push_back(timestamp++);
+            }
+            
+        }
 
         void recordCandidate(uint32_t id) {
             candArray[candIdx++] = id;
@@ -472,5 +485,66 @@ class ProfViolReplPolicy : public T {
             accTimes[id].write = 0;
         }
 };
+
+class OptReplPolicy : public ReplPolicy {
+    protected:
+        // uint64_t timestamp; // incremented on each access
+        uint64_t* array;
+        uint32_t numLines;
+
+    public:
+        explicit OptReplPolicy(uint32_t _numLines) : numLines(_numLines) {
+            if(record_counts)
+                panic("no record counts file offered, you cannot use opt repl")
+            array = gm_calloc<uint64_t>(numLines);
+        }
+
+        ~OptReplPolicy() {
+            gm_free(array);
+        }
+
+        void update(uint32_t id, const MemReq* req) {
+            // when not recording, records are decreasing
+            if(!future_counts[req->lineAddr].empty())
+                future_counts[req->lineAddr].pop_back();
+            array[id] = req->lineAddr;
+        }
+
+        void replaced(uint32_t id) {
+            array[id] = 0;
+        }
+
+        template <typename C> inline uint32_t rank(const MemReq* req, C cands) {
+            
+            uint32_t bestCand = -1;
+            // uint64_t bestScore = (uint64_t)-1L;
+            uint64_t bestScore = 0;
+            for (auto ci = cands.begin(); ci != cands.end(); ci.inc()) {
+                auto id = *ci;
+                if(!cc->isValid(id))
+                    return id;
+                bool ok = future_counts.find(array[id])!=future_counts.end();
+                assert(ok);
+                if(future_counts[array[id]].empty())
+                    return id;
+                auto s = future_counts[array[id]].back();
+                if(s>bestScore){
+                    bestCand = id;
+                    bestScore = s;
+                }
+            }
+            // printf("no invalid, that's good\n");
+            return bestCand;
+        }
+
+        DECL_RANK_BINDINGS;
+
+    // private:
+    //     inline uint64_t score(uint32_t id) { //higher is least evictable
+    //         if(!cc->isValid(id)) return 0;
+    //         return future_counts[array[id]].back();
+    //     }
+};
+
 
 #endif  // REPL_POLICIES_H_
