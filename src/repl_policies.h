@@ -34,10 +34,37 @@
 #include "mtrand.h"
 #include <map>
 #include <vector>
+#include <fstream>
+#include <utility>
 
-extern std::map<uint64_t, std::vector<uint64_t>> future_counts; // trace_zsim.cpp
+extern std::map<std::string, std::map<uint64_t, std::vector<uint64_t>>*> all_future_counts; // trace_zsim.cpp
 extern bool record_counts; // trace_zsim.cpp
-extern uint64_t timestamp; // trace_zsim.cpp
+
+inline void readCountFile(const char* countFile, std::map<uint64_t, std::vector<uint64_t>> &future_counts) {
+    if(!record_counts){
+        // read the count data for optimal replacement
+        std::ifstream fs(countFile);
+        if(!fs)
+            panic("can not open %s",countFile);
+        while (!fs.eof()){
+            char s[40];
+            fs.getline(s,40);
+            if(fs.eof()) break;
+            uint64_t pc = strtoull(s, nullptr, 16);
+            future_counts[pc] = std::vector<uint64_t>();
+            while(!fs.eof()){
+                fs.getline(s,40);
+                if(fs.eof()) break;
+                if(strlen(s)==0) break;
+                uint64_t time = strtoull(s,nullptr,10);
+                future_counts[pc].push_back(time);
+            }
+        }
+        fs.close();
+    }
+    std::string s(countFile);
+    all_future_counts[s] = &future_counts;
+}
 
 /* Generic replacement policy interface. A replacement policy is initialized by the cache (by calling setTop/BottomCC) and used by the cache array. Usage follows two models:
  * - On lookups, update() is called if the replacement policy is to be updated on a hit
@@ -106,10 +133,13 @@ class LRUReplPolicy : public ReplPolicy {
         uint64_t timestamp; // incremented on each access
         uint64_t* array;
         uint32_t numLines;
+        std::map<uint64_t, std::vector<uint64_t>> future_counts;
 
     public:
-        explicit LRUReplPolicy(uint32_t _numLines) : timestamp(1), numLines(_numLines) {
+        explicit LRUReplPolicy(uint32_t _numLines, const char* countFile = nullptr) : timestamp(1), numLines(_numLines) {
             array = gm_calloc<uint64_t>(numLines);
+            if(countFile)
+                readCountFile(countFile, future_counts);
         }
 
         ~LRUReplPolicy() {
@@ -117,6 +147,8 @@ class LRUReplPolicy : public ReplPolicy {
         }
 
         void update(uint32_t id, const MemReq* req) {
+            if(req->timestamp)
+                future_counts[req->lineAddr].push_back(req->timestamp);
             array[id] = timestamp++;
         }
 
@@ -277,14 +309,7 @@ class RandReplPolicy : public LegacyReplPolicy {
             gm_free(candArray);
         }
 
-        void update(uint32_t id, const MemReq* req) {
-            
-            if(record_counts){
-                // when recording, we should record incresingly, and output reversely
-                future_counts[req->lineAddr].push_back(timestamp++);
-            }
-            
-        }
+        void update(uint32_t id, const MemReq* req) {}
 
         void recordCandidate(uint32_t id) {
             candArray[candIdx++] = id;
@@ -491,12 +516,15 @@ class OptReplPolicy : public ReplPolicy {
         // uint64_t timestamp; // incremented on each access
         uint64_t* array;
         uint32_t numLines;
+        std::map<uint64_t, std::vector<uint64_t>> future_counts;
 
     public:
-        explicit OptReplPolicy(uint32_t _numLines) : numLines(_numLines) {
+        explicit OptReplPolicy(uint32_t _numLines, const char* countFile) : numLines(_numLines) {
             if(record_counts)
                 panic("no record counts file offered, you cannot use opt repl")
             array = gm_calloc<uint64_t>(numLines);
+            if(countFile)
+                readCountFile(countFile, future_counts);
         }
 
         ~OptReplPolicy() {
@@ -505,7 +533,7 @@ class OptReplPolicy : public ReplPolicy {
 
         void update(uint32_t id, const MemReq* req) {
             // when not recording, records are decreasing
-            if(!future_counts[req->lineAddr].empty())
+            while(!future_counts[req->lineAddr].empty() && future_counts[req->lineAddr].back() <= req->timestamp)
                 future_counts[req->lineAddr].pop_back();
             array[id] = req->lineAddr;
         }
@@ -523,8 +551,13 @@ class OptReplPolicy : public ReplPolicy {
                 auto id = *ci;
                 if(!cc->isValid(id))
                     return id;
+                
                 bool ok = future_counts.find(array[id])!=future_counts.end();
                 assert(ok);
+                if(req->timestamp)
+                    while(!future_counts[array[id]].empty() && future_counts[array[id]].back() <= req->timestamp)
+                        future_counts[array[id]].pop_back();
+                
                 if(future_counts[array[id]].empty())
                     return id;
                 auto s = future_counts[array[id]].back();

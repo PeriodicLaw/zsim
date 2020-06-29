@@ -80,7 +80,7 @@ void TimingCore::leave() {
 
 void TimingCore::loadAndRecord(Address addr, Address pc) {
     uint64_t startCycle = curCycle;
-    curCycle = l1d->load(addr, curCycle, pc);
+    curCycle = l1d->load(addr, curCycle, pc, 0);
     cRec.record(startCycle);
 }
 
@@ -97,7 +97,7 @@ void TimingCore::bblAndRecord(Address bblAddr, BblInfo* bblInfo) {
     Address endBblAddr = bblAddr + bblInfo->bytes;
     for (Address fetchAddr = bblAddr; fetchAddr < endBblAddr; fetchAddr+=(1 << lineBits)) {
         uint64_t startCycle = curCycle;
-        curCycle = l1i->load(fetchAddr, curCycle, bblAddr /*0 no PC*/);
+        curCycle = l1i->load(fetchAddr, curCycle, 0 /*no PC*/, 0);
         cRec.record(startCycle);
     }
 }

@@ -153,7 +153,7 @@ uint64_t StreamPrefetcher::access(MemReq& req) {
 
                 if (prefetchPos < distance && !e.valid[prefetchPos]) {
                     MESIState state = I;
-                    MemReq pfReq = {req.pc /*0 no PC*/, req.lineAddr + prefetchPos - pos, GETS, req.childId, &state, reqCycle,
+                    MemReq pfReq = {0 /*no PC*/, req.lineAddr + prefetchPos - pos, GETS, req.childId, &state, reqCycle,
                         req.childLock, state, req.srcId, MemReq::PREFETCH, 0 /*not an in-cache prefetch*/};
                     uint64_t pfRespCycle = parent->access(pfReq);  // FIXME, might segfault
                     e.valid[prefetchPos] = true;

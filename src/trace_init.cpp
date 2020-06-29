@@ -150,16 +150,18 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
     //Replacement policy
     string replType = config.get<const char*>(prefix + "repl.type", (arrayType == "IdealLRUPart")? "IdealLRUPart" : "LRU");
     ReplPolicy* rp = nullptr;
+    string countPath = config.get<const char*>(prefix + "count", "");
+    const char* countFile = (countPath == "") ? nullptr : countPath.c_str();
 
     if (replType == "LRU" || replType == "LRUNoSh") {
         bool sharersAware = (replType == "LRU") && !isTerminal;
         if (sharersAware) {
-            rp = new LRUReplPolicy<true>(numLines);
+            rp = new LRUReplPolicy<true>(numLines, countFile);
         } else {
-            rp = new LRUReplPolicy<false>(numLines);
+            rp = new LRUReplPolicy<false>(numLines, countFile);
         }
     } else if (replType == "Opt") {
-        rp = new OptReplPolicy(numLines);
+        rp = new OptReplPolicy(numLines, countFile);
     } else if (replType == "LFU") {
         rp = new LFUReplPolicy(numLines);
     } else if (replType == "LRUProfViol") {

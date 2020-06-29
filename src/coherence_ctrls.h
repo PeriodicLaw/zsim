@@ -158,7 +158,7 @@ class MESIBottomCC : public GlobAlloc {
             parentStat->append(&profSWSpecGETSMiss);
         }
 
-        uint64_t processEviction(Address wbLineAddr, uint32_t lineId, bool lowerLevelWriteback, uint64_t cycle, uint32_t srcId);
+        uint64_t processEviction(Address wbLineAddr, uint32_t lineId, bool lowerLevelWriteback, uint64_t cycle, uint32_t srcId, uint64_t timestamp);
 
         uint64_t processAccess(Address lineAddr, int32_t lineId, AccessType type, uint64_t cycle, uint32_t srcId, uint32_t flags, Address pc, uint32_t skip);
 
@@ -370,7 +370,7 @@ class MESICC : public CC {
         uint64_t processEviction(const MemReq& triggerReq, Address wbLineAddr, int32_t lineId, uint64_t startCycle) {
             bool lowerLevelWriteback = false;
             uint64_t evCycle = tcc->processEviction(wbLineAddr, lineId, &lowerLevelWriteback, startCycle, triggerReq.srcId); //1. if needed, send invalidates/downgrades to lower level
-            evCycle = bcc->processEviction(wbLineAddr, lineId, lowerLevelWriteback, evCycle, triggerReq.srcId); //2. if needed, write back line to upper level
+            evCycle = bcc->processEviction(wbLineAddr, lineId, lowerLevelWriteback, evCycle, triggerReq.srcId, triggerReq.timestamp); //2. if needed, write back line to upper level
             return evCycle;
         }
 
@@ -504,7 +504,7 @@ class MESITerminalCC : public CC {
 
         uint64_t processEviction(const MemReq& triggerReq, Address wbLineAddr, int32_t lineId, uint64_t startCycle) {
             bool lowerLevelWriteback = false;
-            uint64_t endCycle = bcc->processEviction(wbLineAddr, lineId, lowerLevelWriteback, startCycle, triggerReq.srcId); //2. if needed, write back line to upper level
+            uint64_t endCycle = bcc->processEviction(wbLineAddr, lineId, lowerLevelWriteback, startCycle, triggerReq.srcId, triggerReq.timestamp); //2. if needed, write back line to upper level
             return endCycle;  // critical path unaffected, but TimingCache needs it
         }
 

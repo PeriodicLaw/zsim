@@ -47,7 +47,7 @@ void MESIBottomCC::init(const g_vector<MemObject*>& _parents, Network* network, 
 }
 
 
-uint64_t MESIBottomCC::processEviction(Address wbLineAddr, uint32_t lineId, bool lowerLevelWriteback, uint64_t cycle, uint32_t srcId) {
+uint64_t MESIBottomCC::processEviction(Address wbLineAddr, uint32_t lineId, bool lowerLevelWriteback, uint64_t cycle, uint32_t srcId, uint64_t timestamp) {
     MESIState* state = &array[lineId];
     if (lowerLevelWriteback) {
         //If this happens, when tcc issued the invalidations, it got a writeback. This means we have to do a PUTX, i.e. we have to transition to M if we are in E
@@ -61,13 +61,13 @@ uint64_t MESIBottomCC::processEviction(Address wbLineAddr, uint32_t lineId, bool
         case S:
         case E:
             {
-                MemReq req = {0 /*no PC*/, wbLineAddr, PUTS, selfId, state, cycle, &ccLock, *state, srcId, 0 /*no flags*/, 0 /*not a prefetch*/};
+                MemReq req = {0 /*no PC*/, wbLineAddr, PUTS, selfId, state, cycle, &ccLock, *state, srcId, 0 /*no flags*/, timestamp, 0 /*not a prefetch*/};
                 respCycle = parents[getParentId(wbLineAddr)]->access(req);
             }
             break;
         case M:
             {
-                MemReq req = {0 /*no PC*/, wbLineAddr, PUTX, selfId, state, cycle, &ccLock, *state, srcId, 0 /*no flags*/, 0 /*not a prefetch*/};
+                MemReq req = {0 /*no PC*/, wbLineAddr, PUTX, selfId, state, cycle, &ccLock, *state, srcId, 0 /*no flags*/, timestamp, 0 /*not a prefetch*/};
                 respCycle = parents[getParentId(wbLineAddr)]->access(req);
             }
             break;

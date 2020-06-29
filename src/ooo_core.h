@@ -371,6 +371,8 @@ class OOOCore : public Core {
     private:
         OOOFilterCache* l1i;
         OOOFilterCache* l1d;
+        
+        uint64_t timestamp; // timestamp for optimal replacment
 
         uint64_t phaseEndCycle; //next stopping point
 

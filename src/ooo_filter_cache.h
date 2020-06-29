@@ -95,10 +95,11 @@ public:
 
     inline uint64_t load(Address vAddr, uint64_t curCycle,
                          uint64_t dispatchCycle, Address pc,
-                         OOOCoreRecorder *cRec) {
+                         OOOCoreRecorder *cRec,
+                         uint64_t timestamp) {
         Address vLineAddr = vAddr >> lineBits;
         //L1 latency as returned by load() is zero, hence add accLat
-        uint64_t respCycle = FilterCache::load(vAddr, dispatchCycle, pc);
+        uint64_t respCycle = FilterCache::load(vAddr, dispatchCycle, pc, timestamp);
         cRec->record(curCycle, dispatchCycle, respCycle);
 
         //Support legacy prefetching flow for backwards compatibility
@@ -112,7 +113,7 @@ public:
             Address pLineAddr = procMask | vLineAddr;
             Address nextPLineAddr = pLineAddr + numLines;
             issuePrefetch(nextPLineAddr, 0/*prefetch into L1*/, curCycle,
-                          dispatchCycle, cRec, 0/*no PC*/, false);
+                          dispatchCycle, cRec, 0 /*no PC*/, false);
         }
 #ifdef TRACE_BASED
         //Access Dataflow Prefetcher
