@@ -87,6 +87,10 @@ class ReplPolicy : public GlobAlloc {
         virtual uint32_t rankCands(const MemReq* req, ZCands cands) = 0;
 
         virtual void initStats(AggregateStat* parent) {}
+        
+        virtual bool needBypass(uint64_t addr) {return false;}
+        virtual void afterHit(uint64_t addr, uint32_t block_id) {/*printf("after hit %lx\n",addr);*/}
+        virtual void afterMiss(uint64_t addr, uint32_t block_id) {/*printf("after miss %lx\n",addr);*/} // called when miss but not bypass
 };
 
 /* Add DECL_RANK_BINDINGS to each class that implements the new interface,
@@ -579,5 +583,167 @@ class OptReplPolicy : public ReplPolicy {
     //     }
 };
 
+
+class GHRPReplPolicy : public ReplPolicy {
+    protected:
+        uint64_t timestamp;
+        uint64_t* array;
+        uint32_t numLines;
+        uint16_t* block_signature;
+        bool* block_dead;
+        uint16_t global_history;
+        const static int numCounts=4096;
+        const static int numPredTables=3;
+        const static uint64_t bypassThresh=20, deadThresh=20;
+        uint64_t predTables[numCounts][numPredTables];
+
+    public:
+        explicit GHRPReplPolicy(uint32_t _numLines) : timestamp(1), numLines(_numLines) {
+            array = gm_calloc<uint64_t>(numLines);
+            block_signature = gm_calloc<uint16_t>(numLines);
+            block_dead = gm_calloc<bool>(numLines);
+            global_history = 0;
+        }
+
+        ~GHRPReplPolicy() {
+            gm_free(array);
+            gm_free(block_signature);
+            gm_free(block_dead);
+        }
+
+        void update(uint32_t id, const MemReq* req) {
+            array[id] = timestamp++;
+        }
+
+        void replaced(uint32_t id) {
+            array[id] = 0;
+        }
+        
+        void afterAccess(uint64_t addr, uint32_t block_id){
+            block_signature[block_id] = make_signature(addr, global_history);
+            update_history(addr, global_history);
+        }
+        
+        bool needBypass(uint64_t addr) override {
+            auto sign = make_signature(addr, global_history);
+            auto cntrs = getCounters(computeIndices(sign));
+            return majorityVote(cntrs, bypassThresh);
+        }
+        
+        void afterHit(uint64_t addr, uint32_t block_id) override {
+            // printf("afterHit %lx\n",addr);
+            auto sign = make_signature(addr, global_history);
+            auto cntrs = getCounters(computeIndices(sign));
+            updatePredTable(computeIndices(block_signature[block_id]), false);
+            block_dead[block_id] = majorityVote(cntrs, deadThresh);
+            afterAccess(addr, block_id);
+        }
+        
+        void afterMiss(uint64_t addr, uint32_t block_id) override {
+            // printf("afterMiss %lx\n",addr);
+            auto sign = make_signature(addr, global_history);
+            auto cntrs = getCounters(computeIndices(sign));
+            updatePredTable(computeIndices(block_signature[block_id]), true);
+            block_dead[block_id] = majorityVote(cntrs, deadThresh);
+            afterAccess(addr, block_id);
+        }
+
+        template <typename C> inline uint32_t rank(const MemReq* req, C cands) {
+            uint32_t bestCand = -1;
+            uint64_t bestScore = (uint64_t)-1L;
+            for (auto ci = cands.begin(); ci != cands.end(); ci.inc()) {
+                auto id = *ci;
+                if(block_dead[id])
+                    return id;
+                else {
+                    uint32_t s = score(id);
+                    bestCand = (s < bestScore)? id : bestCand;
+                    bestScore = MIN(s, bestScore);
+                }
+            }
+            // if(needBypass(req->lineAddr)){
+            //     req->replaced_cache_line_addr = ;
+            // }
+            return bestCand;
+        }
+
+        DECL_RANK_BINDINGS;
+
+    private:
+        inline uint64_t score(uint32_t id) {
+            return array[id]*cc->isValid(id);
+        }
+        
+        inline uint16_t make_signature(uint64_t pc, uint16_t his) {
+            return (uint16_t)(pc ^ his);
+        }
+        
+        inline void update_history(uint64_t pc, uint16_t &his) {
+            his = (his << 4) | (pc & 7);
+        }
+        
+        inline std::vector<uint64_t> computeIndices(uint16_t signature) {
+            std::vector<uint64_t> indices;
+            for(int i=0; i<numPredTables; i++)
+                indices.push_back(hash(signature,i));
+            return indices;
+        }
+        
+        inline std::vector<uint64_t> getCounters(std::vector<uint64_t> indices) {
+            std::vector<uint64_t> counters;
+            for(int t=0; t<numPredTables; t++)
+                counters.push_back(predTables[indices[t]][t]);
+            return counters;
+        }
+        
+        inline bool majorityVote(std::vector<uint64_t> counters, uint64_t threshold) {
+            int vote = 0;
+            for(int i=0; i<numPredTables; i++)
+                if(counters[i] > threshold)
+                    vote++;
+            return (vote*2 >= numPredTables);
+        }
+        
+        inline void updatePredTable(std::vector<uint64_t> indices, bool isDead) {
+            for(int t=0; t<numPredTables; t++)
+                if(isDead)
+                    predTables[indices[t]][t]++;
+                else
+                    predTables[indices[t]][t]--;
+        }
+        
+        typedef uint64_t UINT64;
+        inline UINT64 mix(UINT64 a, UINT64 b, UINT64 c) {
+            a -= b; a -= c; a ^= (c>>13);
+            b -= c; b -= a; b ^= (a<<8);
+            c -= a; c -= b; c ^= (b>>13);
+            a -= b; a -= c; a ^= (c>>12);
+            b -= c; b -= a; b ^= (a<<16);
+            c -= a; c -= b; c ^= (b>>5);
+            a -= b; a -= c; a ^= (c>>3);
+            b -= c; b -= a; b ^= (a<<10);
+            c -= a; c -= b; c ^= (b>>15);
+            return c;
+        }
+        inline UINT64 f1(UINT64 x) {
+            UINT64 fone = mix(0xfeedface, 0xdeadb10c, x);
+            return fone;
+        }
+        inline UINT64 f2(UINT64 x) {
+            UINT64 ftwo = mix(0xc001d00d, 0xfade2b1c, x);
+            return ftwo;
+        }
+        inline UINT64 fi(UINT64 x) {
+            UINT64 ind = (f1(x) )+ (f2(x));
+            return ind ;
+        }
+        inline uint64_t hash(uint16_t signature, int i) {
+            if(i==0) return f1(signature) & (numCounts-1);
+            else if(i==1) return f2(signature) & (numCounts-1);
+            else if(i==2) return fi(signature) & (numCounts-1);
+            else assert(false);
+        }
+        
+};
 
 #endif  // REPL_POLICIES_H_

@@ -105,6 +105,7 @@ struct MemReq {
     uint32_t flags;
     
     uint64_t timestamp; // timestamp for optimal replacement
+    uint64_t *replaced_cache_line_addr; // use for bypass
 
     //Prefetch skip flag (in contrast to the PREFETCH flag). Skips cache allocation until the value is 0.
     //At that point PREFETCH is effectively set for the target cache insertion.

@@ -98,9 +98,18 @@ public:
                          OOOCoreRecorder *cRec,
                          uint64_t timestamp) {
         Address vLineAddr = vAddr >> lineBits;
+        
+        auto replaced_cache_line_addr = new uint64_t;
+        *replaced_cache_line_addr = 0; // nullptr or 0 means no bypass
+        
         //L1 latency as returned by load() is zero, hence add accLat
-        uint64_t respCycle = FilterCache::load(vAddr, dispatchCycle, pc, timestamp);
+        uint64_t respCycle = FilterCache::load(vAddr, dispatchCycle, pc, timestamp, replaced_cache_line_addr);
         cRec->record(curCycle, dispatchCycle, respCycle);
+        
+        if(*replaced_cache_line_addr != 0) { // bypass occur
+            // printf("bypass %lx\n", *replaced_cache_line_addr);
+            respCycle = load(*replaced_cache_line_addr, curCycle, dispatchCycle, pc, cRec, timestamp);
+        }
 
         //Support legacy prefetching flow for backwards compatibility
         executePrefetch(curCycle, dispatchCycle, 0, cRec);

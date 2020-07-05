@@ -85,6 +85,10 @@ uint64_t Cache::access(MemReq& req) {
             //Make space for new line
             Address wbLineAddr;
             lineId = array->preinsert(req.lineAddr, &req, &wbLineAddr); //find the lineId to replace
+            if(rp->needBypass(req.lineAddr)) {
+                *req.replaced_cache_line_addr = wbLineAddr;
+                // printf("need bypass for %lx\n",wbLineAddr);
+            }
             ZSIM_TRACE(Cache, "[%s] Evicting 0x%lx", name.c_str(), wbLineAddr);
 
             //Evictions are not in the critical path in any sane implementation -- we do not include their delays
@@ -107,6 +111,10 @@ uint64_t Cache::access(MemReq& req) {
         respCycle = cc->processAccess(req, lineId, respCycle);
         if (need_postinsert) {
             array->postinsert(req.lineAddr, &req, lineId, respCycle); //do the actual insertion. NOTE: Now we must split insert into a 2-phase thing because cc unlocks us.
+            if(req.replaced_cache_line_addr && *req.replaced_cache_line_addr == 0)
+                rp->afterMiss(req.lineAddr, lineId);
+        } else {
+            rp->afterHit(req.lineAddr, lineId);
         }
 
 #ifndef EXTERNAL_CACHE_MODEL

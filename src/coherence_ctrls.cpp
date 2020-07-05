@@ -61,13 +61,13 @@ uint64_t MESIBottomCC::processEviction(Address wbLineAddr, uint32_t lineId, bool
         case S:
         case E:
             {
-                MemReq req = {0 /*no PC*/, wbLineAddr, PUTS, selfId, state, cycle, &ccLock, *state, srcId, 0 /*no flags*/, timestamp, 0 /*not a prefetch*/};
+                MemReq req = {0 /*no PC*/, wbLineAddr, PUTS, selfId, state, cycle, &ccLock, *state, srcId, 0 /*no flags*/, timestamp, nullptr, 0 /*not a prefetch*/};
                 respCycle = parents[getParentId(wbLineAddr)]->access(req);
             }
             break;
         case M:
             {
-                MemReq req = {0 /*no PC*/, wbLineAddr, PUTX, selfId, state, cycle, &ccLock, *state, srcId, 0 /*no flags*/, timestamp, 0 /*not a prefetch*/};
+                MemReq req = {0 /*no PC*/, wbLineAddr, PUTX, selfId, state, cycle, &ccLock, *state, srcId, 0 /*no flags*/, timestamp, nullptr, 0 /*not a prefetch*/};
                 respCycle = parents[getParentId(wbLineAddr)]->access(req);
             }
             break;
