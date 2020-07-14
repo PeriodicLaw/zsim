@@ -61,6 +61,8 @@ class CacheArray : public GlobAlloc {
         virtual void postinsert(const Address lineAddr, const MemReq* req, uint32_t lineId, uint64_t respCycle) = 0;
 
         virtual void initStats(AggregateStat* parent) {}
+        
+        virtual bool needBypass(const Address lineAddr, const MemReq *req) {return false;};
 };
 
 class ReplPolicy;
@@ -120,6 +122,8 @@ class SetAssocArray : public CacheArray {
                          VectorCounter &profPc, VectorCounter &profPcNum);
 
         void initStats(AggregateStat* parentStat) override;
+        
+        bool needBypass(const Address lineAddr, const MemReq *req) override;
 };
 
 /* The cache array that started this simulator :) */
@@ -155,6 +159,8 @@ class ZArray : public CacheArray {
         uint32_t getLastCandIdx() const {return lastCandIdx;}
 
         void initStats(AggregateStat* parentStat);
+        
+        bool needBypass(const Address lineAddr, const MemReq *req) override {return false/*rp->needBypass(lineAddr)*/;}
 };
 
 // Simple wrapper classes and iterators for candidates in each case; simplifies replacement policy interface without sacrificing performance

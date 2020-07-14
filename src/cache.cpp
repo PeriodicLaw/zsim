@@ -80,12 +80,16 @@ uint64_t Cache::access(MemReq& req) {
         }
 
         bool need_postinsert = false;
+        // bool record=true;
+        // bool record = req.replaced_cache_line_addr && *req.replaced_cache_line_addr; // if it is second access of bypass, ignore recording
+        bool isfake = req.replaced_cache_line_addr == nullptr;
 
         if (lineId == -1 && cc->shouldAllocate(req)) {
             //Make space for new line
             Address wbLineAddr;
             lineId = array->preinsert(req.lineAddr, &req, &wbLineAddr); //find the lineId to replace
-            if(rp->needBypass(req.lineAddr)) {
+            
+            if(!isfake && array->needBypass(req.lineAddr, &req)) {
                 *req.replaced_cache_line_addr = wbLineAddr;
                 // printf("need bypass for %lx\n",wbLineAddr);
             }
@@ -103,7 +107,7 @@ uint64_t Cache::access(MemReq& req) {
         EventRecorder* evRec = zinfo->eventRecorders[req.srcId];
         TimingRecord wbAcc;
         wbAcc.clear();
-        if (unlikely(evRec && evRec->hasRecord() && req.prefetch == 0)) {
+        if (unlikely(evRec && evRec->hasRecord() && req.prefetch == 0) && !isfake) {
             wbAcc = evRec->popRecord();
         }
 #endif
@@ -120,7 +124,7 @@ uint64_t Cache::access(MemReq& req) {
 #ifndef EXTERNAL_CACHE_MODEL
         // Access may have generated another timing record. If *both* access
         // and wb have records, stitch them together
-        if (unlikely(wbAcc.isValid())) {
+        if (unlikely(wbAcc.isValid()) && !isfake) {
             if (!evRec->hasRecord()) {
                 // Downstream should not care about endEvent for PUTs
                 wbAcc.endEvent = nullptr;

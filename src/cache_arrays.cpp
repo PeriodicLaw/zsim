@@ -220,6 +220,13 @@ uint32_t SetAssocArray::preinsert(const Address lineAddr, const MemReq* req, Add
     return candidate;
 }
 
+bool SetAssocArray::needBypass(const Address lineAddr, const MemReq* req) {
+    uint32_t set = hf->hash(0, lineAddr) & setMask;
+    uint32_t first = set*assoc;
+
+    return rp->needBypassWithCands(lineAddr, req, SetAssocCands(first, first+assoc));
+}
+
 void SetAssocArray::postinsert(const Address lineAddr, const MemReq* req, uint32_t candidate, uint64_t respCycle) {
     rp->replaced(candidate);
     if (isHWPrefetch(req)) {

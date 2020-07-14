@@ -96,19 +96,27 @@ public:
     inline uint64_t load(Address vAddr, uint64_t curCycle,
                          uint64_t dispatchCycle, Address pc,
                          OOOCoreRecorder *cRec,
-                         uint64_t timestamp) {
+                         uint64_t timestamp, bool isfake = false) {
         Address vLineAddr = vAddr >> lineBits;
         
-        auto replaced_cache_line_addr = new uint64_t;
-        *replaced_cache_line_addr = 0; // nullptr or 0 means no bypass
+        uint64_t *replaced_cache_line_addr;
+        if(isfake){
+            replaced_cache_line_addr = nullptr;
+        }else{
+            replaced_cache_line_addr = new uint64_t;
+            *replaced_cache_line_addr = 0; // nullptr or 0 means no bypass
+        }
         
         //L1 latency as returned by load() is zero, hence add accLat
         uint64_t respCycle = FilterCache::load(vAddr, dispatchCycle, pc, timestamp, replaced_cache_line_addr);
         cRec->record(curCycle, dispatchCycle, respCycle);
         
-        if(*replaced_cache_line_addr != 0) { // bypass occur
+        if(!isfake && *replaced_cache_line_addr != 0) { // bypass occur
             // printf("bypass %lx\n", *replaced_cache_line_addr);
-            respCycle = load(*replaced_cache_line_addr, curCycle, dispatchCycle, pc, cRec, timestamp);
+            uint64_t respCycle2 = load(*replaced_cache_line_addr, curCycle, dispatchCycle, pc, cRec, timestamp, true);
+            if(respCycle2 < respCycle)
+                respCycle = respCycle2;
+            // FilterCache::load(*replaced_cache_line_addr, dispatchCycle, pc, timestamp);
         }
 
         //Support legacy prefetching flow for backwards compatibility
