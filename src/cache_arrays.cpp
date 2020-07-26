@@ -209,23 +209,27 @@ void SetAssocArray::trackLoadPc(uint64_t pc, g_unordered_map<uint64_t, uint64_t>
 }
 #endif
 
-uint32_t SetAssocArray::preinsert(const Address lineAddr, const MemReq* req, Address* wbLineAddr) { //TODO: Give out valid bit of wb cand?
+uint32_t SetAssocArray::preinsert(const Address lineAddr, const MemReq* req, Address* wbLineAddr, bool *bypass) { //TODO: Give out valid bit of wb cand?
     uint32_t set = hf->hash(0, lineAddr) & setMask;
     uint32_t first = set*assoc;
 
-    uint32_t candidate = rp->rankCands(req, SetAssocCands(first, first+assoc));
+    uint32_t candidate;
+    if(bypass)
+        candidate = rp->rankCandsWithBypass(req, SetAssocCands(first, first+assoc), *bypass);
+    else
+        candidate = rp->rankCands(req, SetAssocCands(first, first+assoc));
 
     *wbLineAddr = array[candidate].addr;
 
     return candidate;
 }
 
-bool SetAssocArray::needBypass(const Address lineAddr, const MemReq* req) {
-    uint32_t set = hf->hash(0, lineAddr) & setMask;
-    uint32_t first = set*assoc;
+// bool SetAssocArray::needBypass(const Address lineAddr, const MemReq* req) {
+//     uint32_t set = hf->hash(0, lineAddr) & setMask;
+//     uint32_t first = set*assoc;
 
-    return rp->needBypassWithCands(lineAddr, req, SetAssocCands(first, first+assoc));
-}
+//     return rp->needBypassWithCands(lineAddr, req, SetAssocCands(first, first+assoc));
+// }
 
 void SetAssocArray::postinsert(const Address lineAddr, const MemReq* req, uint32_t candidate, uint64_t respCycle) {
     rp->replaced(candidate);
@@ -314,7 +318,7 @@ int32_t ZArray::lookup(const Address lineAddr, const MemReq* req, bool updateRep
     return -1;
 }
 
-uint32_t ZArray::preinsert(const Address lineAddr, const MemReq* req, Address* wbLineAddr) {
+uint32_t ZArray::preinsert(const Address lineAddr, const MemReq* req, Address* wbLineAddr, bool *bypass) {
     ZWalkInfo candidates[cands + ways]; //extra ways entries to avoid checking on every expansion
 
     bool all_valid = true;

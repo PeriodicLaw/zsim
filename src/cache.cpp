@@ -87,11 +87,14 @@ uint64_t Cache::access(MemReq& req) {
         if (lineId == -1 && cc->shouldAllocate(req)) {
             //Make space for new line
             Address wbLineAddr;
-            lineId = array->preinsert(req.lineAddr, &req, &wbLineAddr); //find the lineId to replace
             
-            if(!isfake && array->needBypass(req.lineAddr, &req)) {
-                *req.replaced_cache_line_addr = wbLineAddr;
-                // printf("need bypass for %lx\n",wbLineAddr);
+            if(isfake)
+                lineId = array->preinsert(req.lineAddr, &req, &wbLineAddr);
+            else {
+                bool bypass;
+                lineId = array->preinsert(req.lineAddr, &req, &wbLineAddr, &bypass); //find the lineId to replace
+                if(!isfake && bypass)
+                    *req.replaced_cache_line_addr = wbLineAddr;
             }
             ZSIM_TRACE(Cache, "[%s] Evicting 0x%lx", name.c_str(), wbLineAddr);
 

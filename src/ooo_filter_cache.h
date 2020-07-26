@@ -114,6 +114,7 @@ public:
         if(!isfake && *replaced_cache_line_addr != 0) { // bypass occur
             // printf("bypass %lx\n", *replaced_cache_line_addr);
             uint64_t respCycle2 = load(*replaced_cache_line_addr, curCycle, dispatchCycle, pc, cRec, timestamp, true);
+            // uint64_t respCycle2 = FilterCache::load(*replaced_cache_line_addr, dispatchCycle, pc, timestamp, nullptr);
             if(respCycle2 < respCycle)
                 respCycle = respCycle2;
             // FilterCache::load(*replaced_cache_line_addr, dispatchCycle, pc, timestamp);

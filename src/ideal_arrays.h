@@ -93,7 +93,7 @@ class IdealLRUArray : public CacheArray {
             return lineId;
         }
 
-        uint32_t preinsert(const Address lineAddr, const MemReq* req, Address* wbLineAddr) {
+        uint32_t preinsert(const Address lineAddr, const MemReq* req, Address* wbLineAddr, bool *bypass) {
             Entry* e = lruList.back();
             *wbLineAddr = e->lineAddr;
             return e->lineId;
@@ -274,7 +274,7 @@ class IdealLRUPartArray : public CacheArray {
             return lineId;
         }
 
-        uint32_t preinsert(const Address lineAddr, const MemReq* req, Address* wbLineAddr) {
+        uint32_t preinsert(const Address lineAddr, const MemReq* req, Address* wbLineAddr, bool *bypass) {
             uint32_t lineId = rp->rank(req);
             *wbLineAddr = lineAddrs[lineId].addr;
             return lineId;
