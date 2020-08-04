@@ -64,6 +64,15 @@ uint64_t Cache::access(MemReq& req) {
     uint64_t respCycle = req.cycle;
     bool skipAccess = cc->startAccess(req); //may need to skip access due to races (NOTE: may change req.type!)
     if (likely(!skipAccess)) {
+        // bool normal = req.replaced_cache_line_addr == nullptr && req.replaced_block_id == nullptr;
+        printf("access %lx, cache=%p ", req.lineAddr, array);
+        if(req.replaced_cache_line_addr)
+            if(req.replaced_block_id) printf("[non-fake]\n");
+            else printf("[fake]\n");
+        else
+            if(req.replaced_block_id) printf("[error]\n");
+            else printf("[others/normal]\n");
+        
         bool updateReplacement = (req.type == GETS) || (req.type == GETX);
         uint64_t availCycle;  //cycle the block is/will be available (valid only if MESI state is not I)
         int32_t lineId = array->lookup(req.lineAddr, &req, updateReplacement, &availCycle);
@@ -82,19 +91,30 @@ uint64_t Cache::access(MemReq& req) {
         bool need_postinsert = false;
         // bool record=true;
         // bool record = req.replaced_cache_line_addr && *req.replaced_cache_line_addr; // if it is second access of bypass, ignore recording
-        bool isfake = req.replaced_cache_line_addr == nullptr;
+        bool isfake = req.replaced_cache_line_addr == nullptr && req.replaced_block_id != nullptr;
+        bool bypass = false;
 
         if (lineId == -1 && cc->shouldAllocate(req)) {
             //Make space for new line
             Address wbLineAddr;
             
-            if(isfake)
-                lineId = array->preinsert(req.lineAddr, &req, &wbLineAddr);
-            else {
-                bool bypass;
+            if(req.replaced_cache_line_addr){ // non-fake access
+                printf("non-fake %lx\n", req.lineAddr);
+                rp->recordStatus();
                 lineId = array->preinsert(req.lineAddr, &req, &wbLineAddr, &bypass); //find the lineId to replace
-                if(!isfake && bypass)
+                if(wbLineAddr == 0)
+                    bypass = false;
+                assert(req.replaced_block_id);
+                
+                if(!isfake && bypass){
                     *req.replaced_cache_line_addr = wbLineAddr;
+                    *req.replaced_block_id = lineId;
+                }
+                if(bypass)
+                    printf("bypass addr=%lx, id=%d\n", wbLineAddr, lineId);
+            }else{ // fake access or no bypassing mechanism
+                lineId = array->preinsert(req.lineAddr, &req, &wbLineAddr, nullptr, req.replaced_block_id);
+                if(isfake) printf("fake %lx\n", wbLineAddr);
             }
             ZSIM_TRACE(Cache, "[%s] Evicting 0x%lx", name.c_str(), wbLineAddr);
 
@@ -117,9 +137,14 @@ uint64_t Cache::access(MemReq& req) {
 
         respCycle = cc->processAccess(req, lineId, respCycle);
         if (need_postinsert) {
-            array->postinsert(req.lineAddr, &req, lineId, respCycle); //do the actual insertion. NOTE: Now we must split insert into a 2-phase thing because cc unlocks us.
-            if(req.replaced_cache_line_addr && *req.replaced_cache_line_addr == 0)
+            array->postinsert(req.lineAddr, &req, lineId, respCycle, !isfake && !bypass); //do the actual insertion. NOTE: Now we must split insert into a 2-phase thing because cc unlocks us.
+            if(!isfake && req.replaced_cache_line_addr && *req.replaced_cache_line_addr == 0)
                 rp->afterMiss(req.lineAddr, lineId);
+            if(isfake){
+                printf("checking status...\n");
+                bool ok = rp->checkStatus();
+                assert(ok);
+            }
         } else {
             rp->afterHit(req.lineAddr, lineId);
         }

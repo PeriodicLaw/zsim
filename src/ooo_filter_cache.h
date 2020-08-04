@@ -96,29 +96,28 @@ public:
     inline uint64_t load(Address vAddr, uint64_t curCycle,
                          uint64_t dispatchCycle, Address pc,
                          OOOCoreRecorder *cRec,
-                         uint64_t timestamp, bool isfake = false) {
+                         uint64_t timestamp/*, bool isfake = false, uint32_t *replaced_block_id = nullptr*/) {
+        // printf("top load %lx\n", vAddr);
         Address vLineAddr = vAddr >> lineBits;
         
-        uint64_t *replaced_cache_line_addr;
-        if(isfake){
-            replaced_cache_line_addr = nullptr;
-        }else{
-            replaced_cache_line_addr = new uint64_t;
-            *replaced_cache_line_addr = 0; // nullptr or 0 means no bypass
-        }
+        uint64_t *replaced_cache_line_addr = new uint64_t;
+        *replaced_cache_line_addr = 0; // nullptr or 0 means no bypass
+        uint32_t *replaced_block_id = new uint32_t;
+        *replaced_block_id = 0;
         
         //L1 latency as returned by load() is zero, hence add accLat
-        uint64_t respCycle = FilterCache::load(vAddr, dispatchCycle, pc, timestamp, replaced_cache_line_addr);
+        uint64_t respCycle = FilterCache::load(vAddr, dispatchCycle, pc, timestamp, replaced_cache_line_addr, replaced_block_id);
         cRec->record(curCycle, dispatchCycle, respCycle);
         
-        if(!isfake && *replaced_cache_line_addr != 0) { // bypass occur
+        if(*replaced_cache_line_addr != 0) { // bypass occur
             // printf("bypass %lx\n", *replaced_cache_line_addr);
-            uint64_t respCycle2 = load(*replaced_cache_line_addr, curCycle, dispatchCycle, pc, cRec, timestamp, true);
-            // uint64_t respCycle2 = FilterCache::load(*replaced_cache_line_addr, dispatchCycle, pc, timestamp, nullptr);
-            if(respCycle2 < respCycle)
-                respCycle = respCycle2;
-            // FilterCache::load(*replaced_cache_line_addr, dispatchCycle, pc, timestamp);
+            // uint64_t respCycle2 = load(*replaced_cache_line_addr, curCycle, dispatchCycle, pc, cRec, timestamp, true);
+            uint64_t respCycle2 = FilterCache::load(*replaced_cache_line_addr, dispatchCycle, pc, timestamp, nullptr, replaced_block_id);
+            cRec->record(curCycle, dispatchCycle, respCycle2);
         }
+        
+        delete replaced_cache_line_addr;
+        delete replaced_block_id;
 
         //Support legacy prefetching flow for backwards compatibility
         executePrefetch(curCycle, dispatchCycle, 0, cRec);

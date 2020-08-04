@@ -66,6 +66,26 @@ inline void readCountFile(const char* countFile, std::map<uint64_t, std::vector<
     all_future_counts[s] = &future_counts;
 }
 
+inline void readSummary(const char* summaryFile, std::map<uint64_t, bool> &needBypass) {
+    std::ifstream fs(summaryFile);
+    if(!fs)
+        panic("can not open %s",summaryFile);
+    while (!fs.eof()){
+        uint64_t addr;
+        fs >> std::hex >> addr;
+        char c;
+        while((c = fs.get()) != ',' && c != '\n' && !fs.eof()) ;
+        if(c == '\n' || fs.eof()) break;
+        int access_count, bypass_count;
+        fs >> std::dec >> access_count;
+        fs.get();
+        fs >> bypass_count;
+        // printf("addr = %lx, access_count = %d, bypass_count = %d\n",addr,access_count,bypass_count);
+        needBypass[addr] = (bypass_count*2 >= access_count);
+        while((c = fs.get()) != '\n' && !fs.eof()) ;
+    }
+}
+
 /* Generic replacement policy interface. A replacement policy is initialized by the cache (by calling setTop/BottomCC) and used by the cache array. Usage follows two models:
  * - On lookups, update() is called if the replacement policy is to be updated on a hit
  * - On each replacement, rank() is called with the req and a list of replacement candidates.
@@ -90,9 +110,10 @@ class ReplPolicy : public GlobAlloc {
         virtual void initStats(AggregateStat* parent) {}
         
         virtual bool needBypass(uint64_t addr) {return false;}
-        // virtual bool needBypassWithCands(uint64_t addr, const MemReq* req, SetAssocCands cands) {return needBypass(addr);}
         virtual void afterHit(uint64_t addr, uint32_t block_id) {/*printf("after hit %lx\n",addr);*/}
         virtual void afterMiss(uint64_t addr, uint32_t block_id) {/*printf("after miss %lx\n",addr);*/} // called when miss but not bypass
+        virtual void recordStatus(){}
+        virtual bool checkStatus(){return true;}
 };
 
 /* Add DECL_RANK_BINDINGS to each class that implements the new interface,
@@ -640,6 +661,44 @@ class OptBypassPolicy : public OptReplPolicy {
         }
 };
 
+class LRUBypassPolicy : public LRUReplPolicy<false> {
+    protected:
+        std::map<uint64_t, bool> _needBypass;
+        uint64_t *record_array;
+        bool canCheck;
+    
+    public:
+        explicit LRUBypassPolicy(uint32_t _numLines, const char* summaryFile) : LRUReplPolicy<false>(_numLines, nullptr) {
+            readSummary(summaryFile, _needBypass);
+            record_array = gm_calloc<uint64_t>(numLines);
+            canCheck = false;
+        }
+        
+        bool needBypass(uint64_t addr) override {
+            bool ok = _needBypass.find(addr) != _needBypass.end();
+            assert(ok);
+            return _needBypass[addr];
+        }
+        
+        void recordStatus() override{
+            memcpy(record_array, array, sizeof(uint64_t)*numLines);
+            canCheck = true;
+            printf("can check, this=%p, can check=%d\n", this, this->canCheck);
+        }
+        
+        bool checkStatus() override{
+            printf("end check, this=%p, can check=%d\n", this, this->canCheck);
+            assert(canCheck);
+            canCheck = false;
+            for(uint32_t i=0; i<numLines; i++)
+                if(record_array[i] != array[i]){
+                    printf("difference at %u: %lx != %lx\n", i, record_array[i], array[i]);
+                    return false;
+                }
+            return true;
+        }
+};
+
 
 class GHRPReplPolicy : public ReplPolicy {
     protected:
@@ -719,9 +778,6 @@ class GHRPReplPolicy : public ReplPolicy {
                     bestScore = MIN(s, bestScore);
                 }
             }
-            // if(needBypass(req->lineAddr)){
-            //     req->replaced_cache_line_addr = ;
-            // }
             return bestCand;
         }
 

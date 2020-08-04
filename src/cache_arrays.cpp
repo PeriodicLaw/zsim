@@ -209,12 +209,15 @@ void SetAssocArray::trackLoadPc(uint64_t pc, g_unordered_map<uint64_t, uint64_t>
 }
 #endif
 
-uint32_t SetAssocArray::preinsert(const Address lineAddr, const MemReq* req, Address* wbLineAddr, bool *bypass) { //TODO: Give out valid bit of wb cand?
+uint32_t SetAssocArray::preinsert(const Address lineAddr, const MemReq* req, Address* wbLineAddr, bool *bypass, uint32_t *force_lineid) { //TODO: Give out valid bit of wb cand?
     uint32_t set = hf->hash(0, lineAddr) & setMask;
+    // printf("preinsert addr=%lx, hash=%lx, setMask=%u, set=%x\n",lineAddr, hf->hash(0, lineAddr), setMask, set);
     uint32_t first = set*assoc;
 
     uint32_t candidate;
-    if(bypass)
+    if(force_lineid)
+        candidate = *force_lineid;
+    else if(bypass)
         candidate = rp->rankCandsWithBypass(req, SetAssocCands(first, first+assoc), *bypass);
     else
         candidate = rp->rankCands(req, SetAssocCands(first, first+assoc));
@@ -231,8 +234,8 @@ uint32_t SetAssocArray::preinsert(const Address lineAddr, const MemReq* req, Add
 //     return rp->needBypassWithCands(lineAddr, req, SetAssocCands(first, first+assoc));
 // }
 
-void SetAssocArray::postinsert(const Address lineAddr, const MemReq* req, uint32_t candidate, uint64_t respCycle) {
-    rp->replaced(candidate);
+void SetAssocArray::postinsert(const Address lineAddr, const MemReq* req, uint32_t candidate, uint64_t respCycle, bool needUpdate) {
+    if(needUpdate) rp->replaced(candidate);
     if (isHWPrefetch(req)) {
         profPrefPostInsert.inc();
     }
@@ -256,7 +259,7 @@ void SetAssocArray::postinsert(const Address lineAddr, const MemReq* req, uint32
     array[candidate].availCycle = respCycle;
     array[candidate].startCycle = req->cycle;
     array[candidate].pc = req->pc;
-    rp->update(candidate, req);
+    if(needUpdate) rp->update(candidate, req);
 }
 
 
@@ -318,7 +321,7 @@ int32_t ZArray::lookup(const Address lineAddr, const MemReq* req, bool updateRep
     return -1;
 }
 
-uint32_t ZArray::preinsert(const Address lineAddr, const MemReq* req, Address* wbLineAddr, bool *bypass) {
+uint32_t ZArray::preinsert(const Address lineAddr, const MemReq* req, Address* wbLineAddr, bool *bypass, uint32_t *force_lineid) {
     ZWalkInfo candidates[cands + ways]; //extra ways entries to avoid checking on every expansion
 
     bool all_valid = true;
@@ -402,7 +405,7 @@ uint32_t ZArray::preinsert(const Address lineAddr, const MemReq* req, Address* w
     return bestCandidate;
 }
 
-void ZArray::postinsert(const Address lineAddr, const MemReq* req, uint32_t candidate, uint64_t respCycle) {
+void ZArray::postinsert(const Address lineAddr, const MemReq* req, uint32_t candidate, uint64_t respCycle, bool needUpdate) {
     //We do the swaps in lookupArray, the array stays the same
     assert(lookupArray[swapArray[0]] == candidate);
     for (uint32_t i = 0; i < swapArrayLen-1; i++) {
