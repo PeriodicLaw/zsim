@@ -114,6 +114,7 @@ class ReplPolicy : public GlobAlloc {
         virtual void afterMiss(uint64_t addr, uint32_t block_id) {/*printf("after miss %lx\n",addr);*/} // called when miss but not bypass
         virtual void recordStatus(){}
         virtual bool checkStatus(){return true;}
+        virtual bool supportBypass(){return false;}
 };
 
 /* Add DECL_RANK_BINDINGS to each class that implements the new interface,
@@ -695,6 +696,10 @@ class LRUBypassPolicy : public LRUReplPolicy<false> {
                     printf("difference at %u: %lx != %lx\n", i, record_array[i], array[i]);
                     return false;
                 }
+            return true;
+        }
+        
+        bool supportBypass() override{
             return true;
         }
 };

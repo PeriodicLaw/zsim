@@ -61,130 +61,223 @@ void Cache::initCacheStats(AggregateStat* cacheStat) {
 }
 
 uint64_t Cache::access(MemReq& req) {
-    uint64_t respCycle = req.cycle;
-    bool skipAccess = cc->startAccess(req); //may need to skip access due to races (NOTE: may change req.type!)
-    if (likely(!skipAccess)) {
-        // bool normal = req.replaced_cache_line_addr == nullptr && req.replaced_block_id == nullptr;
-        printf("access %lx, cache=%p ", req.lineAddr, array);
-        if(req.replaced_cache_line_addr)
-            if(req.replaced_block_id) printf("[non-fake]\n");
-            else printf("[fake]\n");
-        else
-            if(req.replaced_block_id) printf("[error]\n");
-            else printf("[others/normal]\n");
-        
-        bool updateReplacement = (req.type == GETS) || (req.type == GETX);
-        uint64_t availCycle;  //cycle the block is/will be available (valid only if MESI state is not I)
-        int32_t lineId = array->lookup(req.lineAddr, &req, updateReplacement, &availCycle);
-        if (lineId != -1 && cc->isValid(lineId)) {
-            //If the block is still inbound, increase the delay.
-            //This also fixes a (relatively infrequent) timing bug in the filter cache where the available cycle
-            //info is lost if a block in a set is replaced and then used again before the cycle is reached.
-            //Add accLat if a) line is in the cache or b) line is not in the cache. If c) line is in-flight (prefetch)
-            //serve from MSHR and do not account for accLat
-            respCycle = (availCycle > respCycle) ? availCycle : respCycle + accLat;
-        }
-        else { //Cache miss
-            respCycle += accLat;
-        }
-
-        bool need_postinsert = false;
-        // bool record=true;
-        // bool record = req.replaced_cache_line_addr && *req.replaced_cache_line_addr; // if it is second access of bypass, ignore recording
-        bool isfake = req.replaced_cache_line_addr == nullptr && req.replaced_block_id != nullptr;
-        bool bypass = false;
-
-        if (lineId == -1 && cc->shouldAllocate(req)) {
-            //Make space for new line
-            Address wbLineAddr;
+    if(rp->supportBypass()){
+    
+        uint64_t respCycle = req.cycle;
+        bool skipAccess = cc->startAccess(req); //may need to skip access due to races (NOTE: may change req.type!)
+        if (likely(!skipAccess)) {
+            // bool normal = req.replaced_cache_line_addr == nullptr && req.replaced_block_id == nullptr;
+            printf("access %lx, cache=%p， supportBypass=%d, ", req.lineAddr, array, rp->supportBypass());
+            if(req.replaced_cache_line_addr)
+                if(req.replaced_block_id) printf("[non-fake]\n");
+                else printf("[fake]\n");
+            else
+                if(req.replaced_block_id) printf("[error]\n");
+                else printf("[others/normal]\n");
             
-            if(req.replaced_cache_line_addr){ // non-fake access
-                printf("non-fake %lx\n", req.lineAddr);
-                rp->recordStatus();
-                lineId = array->preinsert(req.lineAddr, &req, &wbLineAddr, &bypass); //find the lineId to replace
-                if(wbLineAddr == 0)
-                    bypass = false;
-                assert(req.replaced_block_id);
+            bool updateReplacement = (req.type == GETS) || (req.type == GETX);
+            uint64_t availCycle;  //cycle the block is/will be available (valid only if MESI state is not I)
+            int32_t lineId = array->lookup(req.lineAddr, &req, updateReplacement, &availCycle);
+            if (lineId != -1 && cc->isValid(lineId)) {
+                //If the block is still inbound, increase the delay.
+                //This also fixes a (relatively infrequent) timing bug in the filter cache where the available cycle
+                //info is lost if a block in a set is replaced and then used again before the cycle is reached.
+                //Add accLat if a) line is in the cache or b) line is not in the cache. If c) line is in-flight (prefetch)
+                //serve from MSHR and do not account for accLat
+                respCycle = (availCycle > respCycle) ? availCycle : respCycle + accLat;
+            }
+            else { //Cache miss
+                respCycle += accLat;
+            }
+
+            bool need_postinsert = false;
+            // bool record=true;
+            // bool record = req.replaced_cache_line_addr && *req.replaced_cache_line_addr; // if it is second access of bypass, ignore recording
+            bool isfake = req.replaced_cache_line_addr == nullptr && req.replaced_block_id != nullptr;
+            bool bypass = false;
+
+            if (lineId == -1 && cc->shouldAllocate(req)) {
+                //Make space for new line
+                Address wbLineAddr;
                 
-                if(!isfake && bypass){
-                    *req.replaced_cache_line_addr = wbLineAddr;
-                    *req.replaced_block_id = lineId;
+                if(req.replaced_cache_line_addr){ // non-fake access
+                    printf("non-fake %lx\n", req.lineAddr);
+                    rp->recordStatus();
+                    lineId = array->preinsert(req.lineAddr, &req, &wbLineAddr, &bypass); //find the lineId to replace
+                    if(wbLineAddr == 0){
+                        bypass = false;
+                        assert(!isfake);
+                    }
+                    assert(req.replaced_block_id);
+                    
+                    if(!isfake && bypass){
+                        *req.replaced_cache_line_addr = wbLineAddr;
+                        *req.replaced_block_id = lineId;
+                    }
+                    if(bypass)
+                        printf("bypass addr=%lx, id=%d\n", wbLineAddr, lineId);
+                }else{ // fake access or no bypassing mechanism
+                    lineId = array->preinsert(req.lineAddr, &req, &wbLineAddr, nullptr, req.replaced_block_id);
+                    if(isfake) printf("fake %lx\n", wbLineAddr);
                 }
-                if(bypass)
-                    printf("bypass addr=%lx, id=%d\n", wbLineAddr, lineId);
-            }else{ // fake access or no bypassing mechanism
-                lineId = array->preinsert(req.lineAddr, &req, &wbLineAddr, nullptr, req.replaced_block_id);
-                if(isfake) printf("fake %lx\n", wbLineAddr);
+                ZSIM_TRACE(Cache, "[%s] Evicting 0x%lx", name.c_str(), wbLineAddr);
+
+                //Evictions are not in the critical path in any sane implementation -- we do not include their delays
+                //NOTE: We might be "evicting" an invalid line for all we know. Coherence controllers will know what to do
+                cc->processEviction(req, wbLineAddr, lineId, respCycle); //1. if needed, send invalidates/downgrades to lower level
+
+                need_postinsert = true;  //defer the actual insertion until we know its cycle availability
             }
-            ZSIM_TRACE(Cache, "[%s] Evicting 0x%lx", name.c_str(), wbLineAddr);
-
-            //Evictions are not in the critical path in any sane implementation -- we do not include their delays
-            //NOTE: We might be "evicting" an invalid line for all we know. Coherence controllers will know what to do
-            cc->processEviction(req, wbLineAddr, lineId, respCycle); //1. if needed, send invalidates/downgrades to lower level
-
-            need_postinsert = true;  //defer the actual insertion until we know its cycle availability
-        }
-#ifndef EXTERNAL_CACHE_MODEL
-        // Enforce single-record invariant: Writeback access may have a timing
-        // record. If so, read it.
-        EventRecorder* evRec = zinfo->eventRecorders[req.srcId];
-        TimingRecord wbAcc;
-        wbAcc.clear();
-        if (unlikely(evRec && evRec->hasRecord() && req.prefetch == 0) && !isfake) {
-            wbAcc = evRec->popRecord();
-        }
-#endif
-
-        respCycle = cc->processAccess(req, lineId, respCycle);
-        if (need_postinsert) {
-            array->postinsert(req.lineAddr, &req, lineId, respCycle, !isfake && !bypass); //do the actual insertion. NOTE: Now we must split insert into a 2-phase thing because cc unlocks us.
-            if(!isfake && req.replaced_cache_line_addr && *req.replaced_cache_line_addr == 0)
-                rp->afterMiss(req.lineAddr, lineId);
-            if(isfake){
-                printf("checking status...\n");
-                bool ok = rp->checkStatus();
-                assert(ok);
+    #ifndef EXTERNAL_CACHE_MODEL
+            // Enforce single-record invariant: Writeback access may have a timing
+            // record. If so, read it.
+            EventRecorder* evRec = zinfo->eventRecorders[req.srcId];
+            TimingRecord wbAcc;
+            wbAcc.clear();
+            if (unlikely(evRec && evRec->hasRecord() && req.prefetch == 0) && !isfake) {
+                wbAcc = evRec->popRecord();
             }
-        } else {
-            rp->afterHit(req.lineAddr, lineId);
-        }
+    #endif
 
-#ifndef EXTERNAL_CACHE_MODEL
-        // Access may have generated another timing record. If *both* access
-        // and wb have records, stitch them together
-        if (unlikely(wbAcc.isValid()) && !isfake) {
-            if (!evRec->hasRecord()) {
-                // Downstream should not care about endEvent for PUTs
-                wbAcc.endEvent = nullptr;
-                evRec->pushRecord(wbAcc);
+            respCycle = cc->processAccess(req, lineId, respCycle);
+            if (need_postinsert) {
+                array->postinsert(req.lineAddr, &req, lineId, respCycle, !isfake && !bypass); //do the actual insertion. NOTE: Now we must split insert into a 2-phase thing because cc unlocks us.
+                if(!isfake && req.replaced_cache_line_addr && *req.replaced_cache_line_addr == 0)
+                    rp->afterMiss(req.lineAddr, lineId);
+                if(isfake){
+                    printf("checking status...\n");
+                    bool ok = rp->checkStatus();
+                    assert(ok);
+                }
             } else {
-                // Connect both events
-                TimingRecord acc = evRec->popRecord();
-                assert(wbAcc.reqCycle >= req.cycle);
-                assert(acc.reqCycle >= req.cycle);
-                DelayEvent* startEv = new (evRec) DelayEvent(0);
-                DelayEvent* dWbEv = new (evRec) DelayEvent(wbAcc.reqCycle - req.cycle);
-                DelayEvent* dAccEv = new (evRec) DelayEvent(acc.reqCycle - req.cycle);
-                startEv->setMinStartCycle(req.cycle);
-                dWbEv->setMinStartCycle(req.cycle);
-                dAccEv->setMinStartCycle(req.cycle);
-                startEv->addChild(dWbEv, evRec)->addChild(wbAcc.startEvent, evRec);
-                startEv->addChild(dAccEv, evRec)->addChild(acc.startEvent, evRec);
-
-                acc.reqCycle = req.cycle;
-                acc.startEvent = startEv;
-                // endEvent / endCycle stay the same; wbAcc's endEvent not connected
-                evRec->pushRecord(acc);
+                rp->afterHit(req.lineAddr, lineId);
             }
+
+    #ifndef EXTERNAL_CACHE_MODEL
+            // Access may have generated another timing record. If *both* access
+            // and wb have records, stitch them together
+            if (unlikely(wbAcc.isValid()) && !isfake) {
+                if (!evRec->hasRecord()) {
+                    // Downstream should not care about endEvent for PUTs
+                    wbAcc.endEvent = nullptr;
+                    evRec->pushRecord(wbAcc);
+                } else {
+                    // Connect both events
+                    TimingRecord acc = evRec->popRecord();
+                    assert(wbAcc.reqCycle >= req.cycle);
+                    assert(acc.reqCycle >= req.cycle);
+                    DelayEvent* startEv = new (evRec) DelayEvent(0);
+                    DelayEvent* dWbEv = new (evRec) DelayEvent(wbAcc.reqCycle - req.cycle);
+                    DelayEvent* dAccEv = new (evRec) DelayEvent(acc.reqCycle - req.cycle);
+                    startEv->setMinStartCycle(req.cycle);
+                    dWbEv->setMinStartCycle(req.cycle);
+                    dAccEv->setMinStartCycle(req.cycle);
+                    startEv->addChild(dWbEv, evRec)->addChild(wbAcc.startEvent, evRec);
+                    startEv->addChild(dAccEv, evRec)->addChild(acc.startEvent, evRec);
+
+                    acc.reqCycle = req.cycle;
+                    acc.startEvent = startEv;
+                    // endEvent / endCycle stay the same; wbAcc's endEvent not connected
+                    evRec->pushRecord(acc);
+                }
+            }
+    #endif
         }
-#endif
+
+        cc->endAccess(req);
+
+        assert_msg(respCycle >= req.cycle, "[%s] resp < req? 0x%lx type %s childState %s, respCycle %ld reqCycle %ld",
+                name.c_str(), req.lineAddr, AccessTypeName(req.type), MESIStateName(*req.state), respCycle, req.cycle);
+        return respCycle;
+    
+    }else{
+    
+        uint64_t respCycle = req.cycle;
+        bool skipAccess = cc->startAccess(req); //may need to skip access due to races (NOTE: may change req.type!)
+        if (likely(!skipAccess)) {
+            bool updateReplacement = (req.type == GETS) || (req.type == GETX);
+            uint64_t availCycle;  //cycle the block is/will be available (valid only if MESI state is not I)
+            int32_t lineId = array->lookup(req.lineAddr, &req, updateReplacement, &availCycle);
+            if (lineId != -1 && cc->isValid(lineId)) {
+                //If the block is still inbound, increase the delay.
+                //This also fixes a (relatively infrequent) timing bug in the filter cache where the available cycle
+                //info is lost if a block in a set is replaced and then used again before the cycle is reached.
+                //Add accLat if a) line is in the cache or b) line is not in the cache. If c) line is in-flight (prefetch)
+                //serve from MSHR and do not account for accLat
+                respCycle = (availCycle > respCycle) ? availCycle : respCycle + accLat;
+            }
+            else { //Cache miss
+                respCycle += accLat;
+            }
+
+            bool need_postinsert = false;
+
+            if (lineId == -1 && cc->shouldAllocate(req)) {
+                //Make space for new line
+                Address wbLineAddr;
+                lineId = array->preinsert(req.lineAddr, &req, &wbLineAddr); //find the lineId to replace
+                ZSIM_TRACE(Cache, "[%s] Evicting 0x%lx", name.c_str(), wbLineAddr);
+
+                //Evictions are not in the critical path in any sane implementation -- we do not include their delays
+                //NOTE: We might be "evicting" an invalid line for all we know. Coherence controllers will know what to do
+                cc->processEviction(req, wbLineAddr, lineId, respCycle); //1. if needed, send invalidates/downgrades to lower level
+
+                need_postinsert = true;  //defer the actual insertion until we know its cycle availability
+            }
+    #ifndef EXTERNAL_CACHE_MODEL
+            // Enforce single-record invariant: Writeback access may have a timing
+            // record. If so, read it.
+            EventRecorder* evRec = zinfo->eventRecorders[req.srcId];
+            TimingRecord wbAcc;
+            wbAcc.clear();
+            if (unlikely(evRec && evRec->hasRecord() && req.prefetch == 0)) {
+                wbAcc = evRec->popRecord();
+            }
+    #endif
+
+            respCycle = cc->processAccess(req, lineId, respCycle);
+            if (need_postinsert) {
+                array->postinsert(req.lineAddr, &req, lineId, respCycle); //do the actual insertion. NOTE: Now we must split insert into a 2-phase thing because cc unlocks us.
+            }
+
+    #ifndef EXTERNAL_CACHE_MODEL
+            // Access may have generated another timing record. If *both* access
+            // and wb have records, stitch them together
+            if (unlikely(wbAcc.isValid())) {
+                if (!evRec->hasRecord()) {
+                    // Downstream should not care about endEvent for PUTs
+                    wbAcc.endEvent = nullptr;
+                    evRec->pushRecord(wbAcc);
+                } else {
+                    // Connect both events
+                    TimingRecord acc = evRec->popRecord();
+                    assert(wbAcc.reqCycle >= req.cycle);
+                    assert(acc.reqCycle >= req.cycle);
+                    DelayEvent* startEv = new (evRec) DelayEvent(0);
+                    DelayEvent* dWbEv = new (evRec) DelayEvent(wbAcc.reqCycle - req.cycle);
+                    DelayEvent* dAccEv = new (evRec) DelayEvent(acc.reqCycle - req.cycle);
+                    startEv->setMinStartCycle(req.cycle);
+                    dWbEv->setMinStartCycle(req.cycle);
+                    dAccEv->setMinStartCycle(req.cycle);
+                    startEv->addChild(dWbEv, evRec)->addChild(wbAcc.startEvent, evRec);
+                    startEv->addChild(dAccEv, evRec)->addChild(acc.startEvent, evRec);
+
+                    acc.reqCycle = req.cycle;
+                    acc.startEvent = startEv;
+                    // endEvent / endCycle stay the same; wbAcc's endEvent not connected
+                    evRec->pushRecord(acc);
+                }
+            }
+    #endif
+        }
+
+        cc->endAccess(req);
+
+        assert_msg(respCycle >= req.cycle, "[%s] resp < req? 0x%lx type %s childState %s, respCycle %ld reqCycle %ld",
+                name.c_str(), req.lineAddr, AccessTypeName(req.type), MESIStateName(*req.state), respCycle, req.cycle);
+        return respCycle;
+    
     }
-
-    cc->endAccess(req);
-
-    assert_msg(respCycle >= req.cycle, "[%s] resp < req? 0x%lx type %s childState %s, respCycle %ld reqCycle %ld",
-            name.c_str(), req.lineAddr, AccessTypeName(req.type), MESIStateName(*req.state), respCycle, req.cycle);
-    return respCycle;
 }
 
 void Cache::startInvalidate() {
