@@ -40,6 +40,26 @@
 extern std::map<std::string, std::map<uint64_t, std::vector<uint64_t>>*> all_future_counts; // trace_zsim.cpp
 extern bool record_counts; // trace_zsim.cpp
 
+inline void readSummary(const char* summaryFile, std::map<uint64_t, bool> &needBypass) {
+    std::ifstream fs(summaryFile);
+    if(!fs)
+        panic("can not open %s",summaryFile);
+    while (!fs.eof()){
+        uint64_t addr;
+        fs >> std::hex >> addr;
+        char c;
+        while((c = fs.get()) != ',' && c != '\n' && !fs.eof()) ;
+        if(c == '\n' || fs.eof()) break;
+        int access_count, bypass_count;
+        fs >> std::dec >> access_count;
+        fs.get();
+        fs >> bypass_count;
+        // printf("addr = %lx, access_count = %d, bypass_count = %d\n",addr,access_count,bypass_count);
+        needBypass[addr] = (bypass_count*2 >= access_count);
+        while((c = fs.get()) != '\n' && !fs.eof()) ;
+    }
+}
+
 inline void readCountFile(const char* countFile, std::map<uint64_t, std::vector<uint64_t>> &future_counts) {
     if(!record_counts){
         // read the count data for optimal replacement
@@ -640,6 +660,26 @@ class OptBypassPolicy : public OptReplPolicy {
         }
 };
 
+
+class LRUBypassPolicy : public LRUReplPolicy<false> {
+    protected:
+        std::map<uint64_t, bool> _needBypass;
+        uint64_t *record_array;
+        bool canCheck;
+    
+    public:
+        explicit LRUBypassPolicy(uint32_t _numLines, const char* summaryFile) : LRUReplPolicy<false>(_numLines, nullptr) {
+            readSummary(summaryFile, _needBypass);
+            record_array = gm_calloc<uint64_t>(numLines);
+            canCheck = false;
+        }
+        
+        bool needBypass(uint64_t addr) override {
+            bool ok = _needBypass.find(addr) != _needBypass.end();
+            assert(ok);
+            return _needBypass[addr];
+        }
+};
 
 class GHRPReplPolicy : public ReplPolicy {
     protected:

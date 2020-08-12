@@ -152,6 +152,8 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
     ReplPolicy* rp = nullptr;
     string countPath = config.get<const char*>(prefix + "count", "");
     const char* countFile = (countPath == "") ? nullptr : countPath.c_str();
+    string summaryPath = config.get<const char*>(prefix + "summary", "");
+    const char* summaryFile = (summaryPath == "") ? nullptr : summaryPath.c_str();
 
     if (replType == "LRU" || replType == "LRUNoSh") {
         bool sharersAware = (replType == "LRU") && !isTerminal;
@@ -160,6 +162,8 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
         } else {
             rp = new LRUReplPolicy<false>(numLines, countFile);
         }
+    } else if (replType == "LRUBypass") {
+        rp = new LRUBypassPolicy(numLines, summaryFile);
     } else if (replType == "Opt") {
         rp = new OptReplPolicy(numLines, countFile);
     } else if (replType == "OptBypass") {
@@ -301,7 +305,8 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
         //Filter cache optimization
         if (type != "Simple") panic("Terminal cache %s can only have type == Simple", name.c_str());
         if (arrayType != "SetAssoc" || hashType != "None" ||
-            (replType != "LRU" && replType != "Opt" && replType != "Rand" && replType != "GHRP" && replType != "OptBypass")
+            (replType != "LRU" && replType != "Opt" && replType != "Rand"
+                && replType != "GHRP" && replType != "OptBypass" && replType != "LRUBypass")
         ) panic("Invalid FilterCache config %s", name.c_str());
 
         //Access based Next Line Prefetch
