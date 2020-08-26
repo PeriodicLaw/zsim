@@ -144,6 +144,25 @@ class FilterCache : public Cache {
                 return replace(vLineAddr, idx, true, curCycle, pc, timestamp, replaced_cache_line_addr, replaced_block_id);
             }
         }
+        
+        inline bool needBypass(Address vAddr, uint64_t curCycle, Address pc, uint64_t timestamp) {
+            Address vLineAddr = vAddr >> lineBits;
+            uint32_t idx = vLineAddr & setMask;
+            uint64_t availCycle = filterArray[idx].availCycle; //read before, careful with ordering to avoid timing races
+            if (vLineAddr == filterArray[idx].rdAddr && availCycle < curCycle) {
+                return false;
+            } else {
+                MemReq req;
+                req.lineAddr = vLineAddr;
+                req.pc = pc;
+                req.timestamp = timestamp;
+                uint64_t availCycle;
+                int32_t lineId = array->lookup(vLineAddr, &req, false, &availCycle);
+                if(lineId != -1) return false; // cache hit
+                // printf("need bypass? %lx\n", vLineAddr);
+                return array->needBypass(vLineAddr, &req);
+            }
+        }
 
         inline uint64_t store(Address vAddr, uint64_t curCycle, Address pc) {
             Address vLineAddr = vAddr >> lineBits;

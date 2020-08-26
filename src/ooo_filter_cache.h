@@ -100,24 +100,40 @@ public:
         // printf("top load %lx\n", vAddr);
         Address vLineAddr = vAddr >> lineBits;
         
-        uint64_t *replaced_cache_line_addr = new uint64_t;
-        *replaced_cache_line_addr = 0; // nullptr or 0 means no bypass
-        uint32_t *replaced_block_id = new uint32_t;
-        *replaced_block_id = 0;
+        // uint64_t *replaced_cache_line_addr = new uint64_t;
+        // *replaced_cache_line_addr = 0; // nullptr or 0 means no bypass
+        // uint32_t *replaced_block_id = new uint32_t;
+        // *replaced_block_id = 0;
         
+        // printf("first load %lx\n", vAddr);
         //L1 latency as returned by load() is zero, hence add accLat
-        uint64_t respCycle = FilterCache::load(vAddr, dispatchCycle, pc, timestamp, replaced_cache_line_addr, replaced_block_id);
+        uint64_t respCycle;
+        // uint64_t respCycle = FilterCache::load(vAddr, dispatchCycle, pc, timestamp, replaced_cache_line_addr, replaced_block_id);
+        // cRec->record(curCycle, dispatchCycle, respCycle);
+        
+        // MemReq req;
+        // req.timestamp = timestamp;
+        // req.lineAddr = vAddr;
+        // uint64_t availCycle;
+        // printf("vaddr=%lx\n", vAddr);
+        // if(vAddr && array->lookup(vAddr, &req, false, &availCycle) == -1 && array->needBypass(vAddr, &req)){ // miss and need bypass
+        if(FilterCache::needBypass(vAddr, curCycle, pc, timestamp)){
+            respCycle = issuePrefetch(vAddr, 1, curCycle, dispatchCycle, cRec, pc, false);
+        }else{
+            respCycle = FilterCache::load(vAddr, dispatchCycle, pc, timestamp);
+        }
         cRec->record(curCycle, dispatchCycle, respCycle);
         
-        if(*replaced_cache_line_addr != 0) { // bypass occur
-            // printf("bypass %lx\n", *replaced_cache_line_addr);
-            // uint64_t respCycle2 = load(*replaced_cache_line_addr, curCycle, dispatchCycle, pc, cRec, timestamp, true);
-            uint64_t respCycle2 = FilterCache::load(*replaced_cache_line_addr, dispatchCycle, pc, timestamp, nullptr, replaced_block_id);
-            cRec->record(curCycle, dispatchCycle, respCycle2);
-        }
+        // if(*replaced_cache_line_addr != 0) { // bypass occur
+        //     // printf("bypass %lx\n", *replaced_cache_line_addr);
+        //     // uint64_t respCycle2 = load(*replaced_cache_line_addr, curCycle, dispatchCycle, pc, cRec, timestamp, true);
+        //     // printf("second fake load %lx (for %lx)\n", *replaced_cache_line_addr, vAddr);
+        //     uint64_t respCycle2 = FilterCache::load(*replaced_cache_line_addr, dispatchCycle, pc, timestamp, nullptr, replaced_block_id);
+        //     cRec->record(curCycle, dispatchCycle, respCycle2);
+        // }
         
-        delete replaced_cache_line_addr;
-        delete replaced_block_id;
+        // delete replaced_cache_line_addr;
+        // delete replaced_block_id;
 
         //Support legacy prefetching flow for backwards compatibility
         executePrefetch(curCycle, dispatchCycle, 0, cRec);

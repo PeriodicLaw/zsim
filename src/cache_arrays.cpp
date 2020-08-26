@@ -227,12 +227,14 @@ uint32_t SetAssocArray::preinsert(const Address lineAddr, const MemReq* req, Add
     return candidate;
 }
 
-// bool SetAssocArray::needBypass(const Address lineAddr, const MemReq* req) {
-//     uint32_t set = hf->hash(0, lineAddr) & setMask;
-//     uint32_t first = set*assoc;
+bool SetAssocArray::needBypass(const Address lineAddr, const MemReq* req) {
+    uint32_t set = hf->hash(0, lineAddr) & setMask;
+    uint32_t first = set*assoc;
 
-//     return rp->needBypassWithCands(lineAddr, req, SetAssocCands(first, first+assoc));
-// }
+    bool bypass = false;
+    rp->rankCandsWithBypass(req, SetAssocCands(first, first+assoc), bypass);
+    return bypass;
+}
 
 void SetAssocArray::postinsert(const Address lineAddr, const MemReq* req, uint32_t candidate, uint64_t respCycle, bool needUpdate) {
     if(needUpdate) rp->replaced(candidate);

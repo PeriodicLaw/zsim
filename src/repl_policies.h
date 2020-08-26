@@ -36,6 +36,7 @@
 #include <vector>
 #include <fstream>
 #include <utility>
+#include <algorithm>
 
 extern std::map<std::string, std::map<uint64_t, std::vector<uint64_t>>*> all_future_counts; // trace_zsim.cpp
 extern bool record_counts; // trace_zsim.cpp
@@ -86,6 +87,35 @@ inline void readSummary(const char* summaryFile, std::map<uint64_t, bool> &needB
     }
 }
 
+inline void readSummary2(const char* summaryFile, std::map<uint64_t, std::vector<uint64_t>> &summary) {
+    std::ifstream fs(summaryFile);
+    if(!fs)
+        panic("can not open %s",summaryFile);
+    while (!fs.eof()){
+        uint64_t addr;
+        fs >> std::hex >> addr;
+        char c;
+        while((c = fs.get()) != ',' && c != '\n' && !fs.eof()) ;
+        if(c == '\n' || fs.eof()) break;
+        int access_count, bypass_count, len;
+        fs >> std::dec >> access_count;
+        fs.get();
+        fs >> bypass_count;
+        fs.get();
+        fs >> len;
+        fs.get();
+        // printf("addr=%lx, len=%d\n", addr, len);
+        auto &v = summary[addr];
+        while(len--){
+            uint64_t addr;
+            fs >> std::hex >> addr;
+            v.push_back(addr);
+            while((c = fs.get()) != ',' && c != '\n' && !fs.eof()) ;
+            if(c == '\n' || fs.eof()) break;
+        }
+    }
+}
+
 /* Generic replacement policy interface. A replacement policy is initialized by the cache (by calling setTop/BottomCC) and used by the cache array. Usage follows two models:
  * - On lookups, update() is called if the replacement policy is to be updated on a hit
  * - On each replacement, rank() is called with the req and a list of replacement candidates.
@@ -112,9 +142,9 @@ class ReplPolicy : public GlobAlloc {
         virtual bool needBypass(uint64_t addr) {return false;}
         virtual void afterHit(uint64_t addr, uint32_t block_id) {/*printf("after hit %lx\n",addr);*/}
         virtual void afterMiss(uint64_t addr, uint32_t block_id) {/*printf("after miss %lx\n",addr);*/} // called when miss but not bypass
-        virtual void recordStatus(){}
-        virtual bool checkStatus(){return true;}
-        virtual bool supportBypass(){return false;}
+        // virtual void recordStatus(){}
+        // virtual bool checkStatus(){return true;}
+        // virtual bool supportBypass(){return false;}
 };
 
 /* Add DECL_RANK_BINDINGS to each class that implements the new interface,
@@ -665,42 +695,83 @@ class OptBypassPolicy : public OptReplPolicy {
 class LRUBypassPolicy : public LRUReplPolicy<false> {
     protected:
         std::map<uint64_t, bool> _needBypass;
-        uint64_t *record_array;
-        bool canCheck;
+        // uint64_t *record_array;
+        // bool canCheck;
     
     public:
         explicit LRUBypassPolicy(uint32_t _numLines, const char* summaryFile) : LRUReplPolicy<false>(_numLines, nullptr) {
             readSummary(summaryFile, _needBypass);
-            record_array = gm_calloc<uint64_t>(numLines);
-            canCheck = false;
+            // record_array = gm_calloc<uint64_t>(numLines);
+            // canCheck = false;
         }
         
         bool needBypass(uint64_t addr) override {
+            // printf("addr=%lx\n\n", addr);
             bool ok = _needBypass.find(addr) != _needBypass.end();
             assert(ok);
             return _needBypass[addr];
         }
         
-        void recordStatus() override{
-            memcpy(record_array, array, sizeof(uint64_t)*numLines);
-            canCheck = true;
-            printf("can check, this=%p, can check=%d\n", this, this->canCheck);
-        }
+        // void recordStatus() override{
+        //     memcpy(record_array, array, sizeof(uint64_t)*numLines);
+        //     canCheck = true;
+        //     // printf("can check, this=%p, can check=%d\n", this, this->canCheck);
+        // }
         
-        bool checkStatus() override{
-            printf("end check, this=%p, can check=%d\n", this, this->canCheck);
-            assert(canCheck);
-            canCheck = false;
+        // bool checkStatus() override{
+        //     assert(canCheck);
+        //     canCheck = false;
+        //     for(uint32_t i=0; i<numLines; i++)
+        //         if(record_array[i] != array[i]){
+        //             printf("difference at %u: %lx != %lx\n", i, record_array[i], array[i]);
+        //             return false;
+        //         }
+        //     return true;
+        // }
+        
+        // bool supportBypass() override{
+        //     return true;
+        // }
+};
+
+class GuidedLRUPolicy : public LRUReplPolicy<false> {
+    protected:
+        std::map<uint64_t, std::vector<uint64_t>> summary;
+        uint64_t *addrs;
+    
+    public:
+        explicit GuidedLRUPolicy(uint32_t _numLines, const char* summaryFile) : LRUReplPolicy<false>(_numLines, nullptr) {
+            readSummary2(summaryFile, summary);
+            addrs = gm_calloc<uint64_t>(numLines);
             for(uint32_t i=0; i<numLines; i++)
-                if(record_array[i] != array[i]){
-                    printf("difference at %u: %lx != %lx\n", i, record_array[i], array[i]);
-                    return false;
-                }
-            return true;
+                addrs[i] = 0;
         }
         
-        bool supportBypass() override{
-            return true;
+        ~GuidedLRUPolicy(){
+            gm_free(addrs);
+        }
+        
+        void update(uint32_t id, const MemReq* req) {
+            addrs[id] = req->lineAddr;
+        }
+
+        void replaced(uint32_t id) {
+            addrs[id] = 0;
+        }
+        
+        virtual uint32_t rankCands(const MemReq* req, SetAssocCands cands) override {
+            for (auto ci = cands.begin(); ci != cands.end(); ci.inc()) {
+                auto id = *ci;
+                if(addrs[id] == 0) return id;
+                bool ok = summary.find(req->lineAddr) != summary.end();
+                // if(!ok) printf("addr=%lx\n", req->lineAddr);
+                if(!ok) continue;
+                assert(ok);
+                auto &v = summary[req->lineAddr];
+                if(std::find(v.begin(), v.end(), addrs[id]) != v.end())
+                    return id;
+            }
+            return LRUReplPolicy<false>::rankCands(req, cands);
         }
 };
 

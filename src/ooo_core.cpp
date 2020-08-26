@@ -351,7 +351,8 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
                     dispatchCycle = MAX(lastStoreAddrCommitCycle+1, dispatchCycle);
 
                     Address addr = storeAddrs[storeIdx++];
-                    uint64_t reqSatisfiedCycle = l1d->store(addr, curCycle, dispatchCycle, uop->pc, &cRec);
+                    // uint64_t reqSatisfiedCycle = l1d->store(addr, curCycle, dispatchCycle, uop->pc, &cRec);
+                    uint64_t reqSatisfiedCycle = l1d->getAccLat();
                     // Fill the forwarding table
                     fwdArray[(addr>>2) & (FWD_ENTRIES-1)].set(addr, reqSatisfiedCycle);
 

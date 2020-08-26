@@ -123,7 +123,7 @@ class SetAssocArray : public CacheArray {
 
         void initStats(AggregateStat* parentStat) override;
         
-        // bool needBypass(const Address lineAddr, const MemReq *req) override;
+        bool needBypass(const Address lineAddr, const MemReq *req) override;
 };
 
 /* The cache array that started this simulator :) */
