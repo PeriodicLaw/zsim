@@ -170,6 +170,8 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
         rp = new OptBypassPolicy(numLines, countFile);
     } else if (replType == "GHRP") {
         rp = new GHRPReplPolicy(numLines);
+    } else if (replType == "GuidedLRU") {
+        rp = new GuidedLRUPolicy(numLines, summaryFile);
     } else if (replType == "LFU") {
         rp = new LFUReplPolicy(numLines);
     } else if (replType == "LRUProfViol") {
@@ -306,7 +308,8 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
         if (type != "Simple") panic("Terminal cache %s can only have type == Simple", name.c_str());
         if (arrayType != "SetAssoc" || hashType != "None" ||
             (replType != "LRU" && replType != "Opt" && replType != "Rand"
-                && replType != "GHRP" && replType != "OptBypass" && replType != "LRUBypass")
+                && replType != "GHRP" && replType != "OptBypass" && replType != "LRUBypass"
+                && replType != "GuidedLRU")
         ) panic("Invalid FilterCache config %s", name.c_str());
 
         //Access based Next Line Prefetch
